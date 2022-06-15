@@ -1,40 +1,32 @@
-import 'dart:convert';
 import 'dart:io';
-import 'dart:ffi' as ffi;
-
-import 'package:archive/archive.dart';
-import 'package:ffi/ffi.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-
+import 'package:process_run/shell.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-void main() {
+Future main() async {
+  // await Isolate.spawn((message) {getAPIforDLL();}, num);
   runApp(const MyApp());
 }
 
-typedef GOFunc = ffi.Pointer<Utf8>
-    Function(); // 这里调用go 函数 没有传入参数 https://www.kikt.top/posts/flutter/ffi/1-first-party/
-typedef GetURL = ffi.Pointer<Utf8> Function(); // 这里是操作的dart的返回接口 调用函数返回 string
+// steamcmd +login anonymous +force_install_dir c:\steamcmd\csgoserver +app_update 740 validate +quit
+// steamcmd +login AA BB +workshop_download_item 221100 1605653648 +quit
 
 //  上面两个必须是同一类型....
 // E:\Flutter_project\wallpaper_engine_workshop_downloader\windows\runner\main.cpp 改名字
 
-String VerSion = "0009";
+String VerSion = "V025";
 // List LogText = ["版本号:" + VerSion];
 /// 第一步 定义 ValueNotifier
 List<String> LogText = ["版本号:" + VerSion];
 
 /// 第一步 定义 ValueNotifier
 ValueNotifier<String> LogsNotifier = ValueNotifier<String>("");
-String ApiURL = "";
-bool restartWE = false;
+
 String wallpaper64 = "";
-bool autoOpenSteamWorkshop = false;
-bool autoReDownFailed = false;
-bool autoOpened = false;
+bool multidown = false;
 
 class MyApp extends StatelessWidget {
   const MyApp({Key? key}) : super(key: key);
@@ -73,38 +65,21 @@ class MyHomePage extends StatefulWidget {
 TextEditingController urlController = TextEditingController();
 
 class _MyHomePageState extends State<MyHomePage> {
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _passwdController = TextEditingController();
+
   @override
   Widget build(BuildContext context) {
-    if (autoOpenSteamWorkshop == true && autoOpened == false) {
-      launchURL("https://steamworkshopdownloader.io/");
-      autoOpened = true;
-      delayedSeconds(2).then((value) =>
-          launchURL("https://steamcommunity.com/app/431960/workshop/"));
-    }
+    _launchUrl("https://steamcommunity.com/app/431960/workshop/");
     return Scaffold(
-        // appBar: AppBar(
-        //   title: const Text("Wallpaper Engine 壁纸一键下载"),
-        // ),
         body: Container(
-      padding: const EdgeInsets.all(5),
+      padding: const EdgeInsets.all(15),
       child: Column(
         // mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             //菜单栏 主要存放菜单数据
             children: [
-              TextButton(
-                child: const Text("壁纸资源网址"),
-                onPressed: () {
-                  launchURL("https://steamcommunity.com/app/431960/workshop/");
-                },
-              ),
-              TextButton(
-                child: const Text("手动下载壁纸网址"),
-                onPressed: () {
-                  launchURL("https://steamworkshopdownloader.io/");
-                },
-              ),
               FutureBuilder(
                 future: getPreferences("wallpaper64.exe"),
                 // initialData: InitialData,
@@ -118,16 +93,16 @@ class _MyHomePageState extends State<MyHomePage> {
                           allowedExtensions: ['exe'],
                         );
                         // print(result!.files.single.name.toString());
-                        if (result != null) {
-                          if (result.files.single.name.toString() ==
-                              "wallpaper64.exe") {
-                            // obtain shared preferences
-                            final prefs = await SharedPreferences.getInstance();
-                            prefs.setString('wallpaper64.exe',
-                                result.files.single.path!.toString());
-
-                            setState(() {});
-                          }
+                        if (result != null &&
+                            result.files.single.name.toString() ==
+                                "wallpaper64.exe") {
+                          // obtain shared preferences
+                          final prefs = await SharedPreferences.getInstance();
+                          prefs.setString('wallpaper64.exe',
+                              result.files.single.path!.toString());
+                          // 重新选择 壁纸路径之后重建软连接
+                          doLink(true);
+                          setState(() {});
                         }
                       },
                       icon: const Icon(Icons.favorite),
@@ -138,126 +113,94 @@ class _MyHomePageState extends State<MyHomePage> {
                               : "未选择wallpaper64.exe")); //此处是三元运算。
                 },
               ),
-              FutureBuilder(
-                future: getAPIforDLL().then((value) {
-                  // 得到结果后还是刷新下界面嘛
-                  setState(() {});
-                }),
-                // initialData: const Text("正在获取API"),
-                builder: (BuildContext context, AsyncSnapshot snapshot) {
-                  // snapshot 接收 future 返回的值
-                  return TextButton.icon(
-                      onPressed: () async {
-                        if (snapshot.data.toString() == "未安装Chrome") {
-                          launchURL("https://www.iplaysoft.com/tools/chrome/");
-                        }
-
-                        //https://www.iplaysoft.com/tools/chrome/
-                        setState(() {});
-                      },
-                      icon: const Icon(Icons.laptop_chromebook),
-                      label: Text(snapshot.data.toString() != "未安装Chrome"
-                          ? "已安装Chrome"
-                          : "已安装Chrome")); //此处是三元运算。
-                },
-              ),
-            ],
-          ),
-          Row(
-            children: [
-              ElevatedButton.icon(
-                  onPressed: () {
-                    launchURL("https://shaoxia.xyz/");
-                  },
-                  icon: Icon(Icons.access_alarm_outlined),
-                  label: Text("关于作者")),
               const SizedBox(
-                width: 5,
+                width: 20,
               ),
               ElevatedButton.icon(
                   onPressed: () {
-                    launchURL(
+                    _launchUrl(
                         "https://github.com/user1121114685/Wallpaper_Engine");
-                    // // getAPIforDLL();
-                    // setState(() {});
                   },
                   icon: const Icon(Icons.open_in_new_rounded),
                   label: const Text("开源地址")),
               const SizedBox(
-                width: 5,
+                width: 20,
               ),
-              ElevatedButton.icon(
-                  onPressed: () {
-                    ApiURL = "";
-                    getAPIforDLL();
-                    setState(() {});
-                  },
-                  icon: const Icon(Icons.refresh),
-                  label: const Text("重获api"))
+              // 因为需要建立软连接 所以需要管理员运行
+              Text(
+                "首次使用 需要以管理员权限运行！",
+                style: TextStyle(color: Colors.red[200], fontSize: 23),
+              )
             ],
           ),
+          const SizedBox(
+            height: 20,
+          ),
+          const Divider(
+              // color: Colors.red,
+              ),
           Row(
             children: [
-              const Text("自动打开壁纸资源网址"),
-              FutureBuilder(
-                future: getCheckBoxValue("autoOpenSteamWorkshop"),
-                // initialData: InitialData,
-                builder: (BuildContext context, AsyncSnapshot snapshot) {
-                  // snapshot 接收 future 返回的值
-                  return Checkbox(
-                      value: snapshot.data ?? false,
-                      onChanged: (i) async {
-                        // obtain shared preferences
-                        final prefs = await SharedPreferences.getInstance();
-                        prefs.setBool('autoOpenSteamWorkshop', i!);
-                        setState(() {});
-                      });
-                },
+              const Text("Steam账号："),
+              SizedBox(
+                width: 110,
+                height: 30,
+                child: TextField(
+                    controller: _nameController,
+                    textInputAction: TextInputAction.done,
+                    decoration: const InputDecoration(
+                        enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(width: 2, color: Colors.blue),
+                    ))),
+              ),
+              const Text("Steam密码："),
+              SizedBox(
+                width: 110,
+                height: 30,
+                child: TextField(
+                    controller: _passwdController,
+                    textInputAction: TextInputAction.done,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                        enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(width: 2, color: Colors.blue),
+                    ))),
               ),
               const SizedBox(
-                width: 5,
+                width: 20,
               ),
-              const Text("自动重启Wallpaper Engine"),
-              FutureBuilder(
-                future: getCheckBoxValue("reStartWE"),
-                // initialData: InitialData,
-                builder: (BuildContext context, AsyncSnapshot snapshot) {
-                  // snapshot 接收 future 返回的值
-                  return Checkbox(
-                      value: snapshot.data ?? false,
-                      onChanged: (i) async {
-                        // obtain shared preferences
-                        final prefs = await SharedPreferences.getInstance();
-                        prefs.setBool('reStartWE', i!);
-                        setState(() {});
-                      });
-                },
+              ElevatedButton(
+                  onPressed: () async {
+                    // 将名字保存起来
+                    final prefs = await SharedPreferences.getInstance();
+                    prefs.setString('SteamPSWD', _passwdController.text);
+                    prefs.setString('SteamName', _nameController.text);
+                  },
+                  child: const Text("保存账号密码")),
+              const SizedBox(
+                width: 10,
               ),
-              // SizedBox(
-              //   width: 5,
-              // ),
-              // Text("失败自动重下"),
-              // FutureBuilder(
-              //   future: getCheckBoxValue("autoReDownFailed"),
-              //   // initialData: InitialData,
-              //   builder: (BuildContext context, AsyncSnapshot snapshot) {
-              //     // snapshot 接收 future 返回的值
-              //     return Checkbox(
-              //         value: snapshot.data ?? false,
-              //         onChanged: (i) async {
-              //           // obtain shared preferences
-              //           final prefs = await SharedPreferences.getInstance();
-              //           prefs.setBool('autoReDownFailed', i!);
-              //           setState(() {});
-              //         });
-              //   },
-              // ),
+              ElevatedButton(
+                  onPressed: () async {
+                    // 将名字保存起来
+                    final prefs = await SharedPreferences.getInstance();
+
+                    prefs.remove("SteamPSWD");
+                    prefs.remove("SteamName");
+                  },
+                  child: const Text("清除已保存的账号密码")),
             ],
           ),
+          const SizedBox(
+            height: 20,
+          ),
+          const Divider(
+              // color: Colors.blue,
+              ),
           Row(
             children: [
               SizedBox(
-                width: 600,
+                width: 500,
                 child: TextField(
                   autofocus: true,
                   controller: urlController,
@@ -274,35 +217,70 @@ class _MyHomePageState extends State<MyHomePage> {
                       fileid = fileid.substring(3);
                       logTextAdd("ID正确  开始下载...");
 
-                      downlaodAndUnzip(fileid.toString());
+                      // 输入命令
+                      // 如果勾选了 整页下载就执行整页下载 否则就下载单个
+                      if (multidown) {
+                        multiDownFile();
+                      } else {
+                        RegExp exp = RegExp(r"id=\d+");
+                        var fileid = exp.stringMatch(urlController.text);
+
+                        toDownItem(fileid!);
+                      }
                     }
                   },
                   decoration: const InputDecoration(
                       labelText: "输入下载地址(包含id=xxxxxxxx)",
                       hintText:
-                          " 例如 https://steamcommunity.com/sharedfiles/filedetails/?id=1289832516"),
+                          " 例如 https://steamcommunity.com/sharedfiles/filedetails/?id=1289832516",
+                      hintStyle: TextStyle(fontSize: 15),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(width: 2, color: Colors.blue),
+                      )),
                 ),
+              ),
+              const SizedBox(
+                width: 20,
               ),
               SizedBox(
                   height: 50,
                   child: ElevatedButton.icon(
-                      onPressed: () {
-                        RegExp exp = RegExp(r"id=\d+");
-                        var fileid = exp.stringMatch(urlController.text);
-
-                        if (fileid == null) {
-                          urlController.clear();
-                          logTextAdd("请输入正确的ID,连接包含id=xxxxxx");
+                      onPressed: () async {
+                        // 如果勾选了 整页下载就执行整页下载 否则就下载单个
+                        if (multidown) {
+                          multiDownFile();
                         } else {
-                          fileid = fileid.substring(3);
-                          logTextAdd("ID正确  开始下载...");
+                          RegExp exp = RegExp(r"id=\d+");
+                          var fileid = exp.stringMatch(urlController.text);
 
-                          downlaodAndUnzip(fileid.toString());
+                          toDownItem(fileid!);
                         }
                       },
                       icon: const Icon(Icons.download),
-                      label: const Text("下载壁纸"))),
+                      label: const Text("下载"))),
+              const SizedBox(
+                width: 20,
+              ),
+              const Text(
+                "整页",
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+              SizedBox(
+                height: 50,
+                child: Checkbox(
+                    value: multidown,
+                    activeColor: Colors.red, //选中时的颜色
+                    onChanged: (value) {
+                      multidown = value!;
+                      setState(() {
+                        // _checkboxSelected=value;
+                      });
+                    }),
+              )
             ],
+          ),
+          const SizedBox(
+            height: 20,
           ),
           ValueListenableBuilder(
               valueListenable: LogsNotifier,
@@ -332,224 +310,6 @@ Future<String> getPreferences(String keyword) async {
   return prefs.getString(keyword).toString();
 }
 
-Future getCheckBoxValue(String keyword) async {
-  final prefs = await SharedPreferences.getInstance();
-  if (keyword == "reStartWE") {
-    restartWE = prefs.getBool(keyword)!;
-  }
-// Try reading data from the counter key. If it doesn't exist, return 0.
-  if (keyword == "autoOpenSteamWorkshop") {
-    autoOpenSteamWorkshop = prefs.getBool(keyword)!;
-  }
-  //autoReDownFailed
-  if (keyword == "autoReDownFailed") {
-    autoReDownFailed = prefs.getBool(keyword)!;
-  }
-  return prefs.getBool(keyword);
-}
-
-void launchURL(String url) async =>
-    await canLaunch(url) ? await launch(url) : throw 'Could not launch $url';
-
-// Future getAPIurl() async {
-//   Directory tempDir = await getTemporaryDirectory();
-//   String tempPath = tempDir.path;
-//   print(tempPath);
-//   await Process.run(
-//       "E:\\Flutter_project\\wallpaper_engine_workshop_downloader\\lib\\API\\steamdownload.exe",
-//       []).then((value) async {
-//     try {
-//       var resp = await Dio().get("http://127.0.0.1:9191/api");
-//       logTextAdd(resp.toString());
-
-//       ApiURL = resp.toString();
-//     } catch (e) {
-//       print(e);
-//     }
-//   });
-
-//   print(LogText);
-// }
-
-Future getAPIforDLL() async {
-  if (ApiURL == "") {
-    var dll = ffi.DynamicLibrary.open(
-        r'data/flutter_assets/assets/steamdownload.dll');
-    // 下面是调试代码
-    //     var dll = ffi.DynamicLibrary.open(
-    // r'assets/steamdownload.dll');
-// 把我弄不会了，日了。。。。 看来只能修改pubspec.yaml 这样与实际的不一致的地方了
-// 你以为我想放这里吗？编译的时候直接放进去了。。。data\flutter_assets\assets\steamdownload.dll
-    // https://www.coder.work/article/7192255 重要得参考 FFI得使用
-    // GOLANG中 导出的函数要首字大写 getAPI是错的 并且还需加上注释 //export GetAPI
-    final GetURL geturl =
-        dll.lookup<ffi.NativeFunction<GOFunc>>('GetAPI').asFunction();
-    var url = geturl();
-
-    logTextAdd("找到了API    " + url.cast<Utf8>().toDartString());
-    if (url.cast<Utf8>().toDartString() != "未安装Chrome") {
-      ApiURL = url.cast<Utf8>().toDartString();
-    }
-
-    return url.cast<Utf8>().toDartString();
-  }
-}
-
-Future downlaodAndUnzip(String fileid) async {
-  // String wallpaper64 = getPreferences("wallpaper64.exe").toString();
-  if (wallpaper64 != "null") {
-    try {
-      // 向服务器发送下载请求  常量与变量才使用+连接，常量与常量可以直接连接
-      var resp = await Dio().post(ApiURL + "download/request",
-          data: "{" "\"publishedFileId\":" +
-              fileid +
-              ","
-                  "\"collectionId\":null,\"extract\":true,\"hidden\":false,\"direct\":false,\"autodownload\":false"
-                  "}");
-      // 得到返回的UUID
-// {"uuid":"07e15f2f-c4e2-44f3-a424-f367f1d3c961"}
-
-      Map<String, dynamic> uuid =
-          jsonDecode(resp.data); // 简单的序列化下返回的Json 关键点为 索引的UUID 为string
-      //resp.data["uuid"];
-      String newuuid = uuid["uuid"];
-      //查询服务器下载状态
-      bool addProgress = false;
-      while (true) {
-        try {
-          Response status = await Dio().post(ApiURL + "download/status",
-              data: "{\"uuids\":[\"" + newuuid + "\"]}");
-          // 返回下载进度
-          //{"07e15f2f-c4e2-44f3-a424-f367f1d3c961":{"age":6,"status":"retrieved","progress":100,"progressText":"retrieving: 100%","downloadError":"never transmitted"}}
-          Map<String, dynamic> serverStatus = jsonDecode(status.data);
-          // print(serverStatus[newuuid]["progressText"]);
-
-          if (serverStatus[newuuid]["progressText"]
-              .toString()
-              .contains("failed")) {
-            //包含 failed 下载失败
-            logTextAdd(fileid + "  下载失败");
-
-            break;
-          }
-          // print("object");
-          // print("下载进度" + serverStatus[newuuid]["progress"]);
-          if (serverStatus[newuuid]["progress"] > 150) {
-            logTextAdd(fileid + "  服务器下载成功...开始下载到本地");
-            break;
-          }
-          // 还是为了直观好看 只显示一行log
-          if (addProgress == false) {
-            logTextAdd(fileid +
-                "  服务器下载进度" +
-                serverStatus[newuuid]["progress"].toString() +
-                "%");
-            addProgress = true;
-          } else {
-            String log = fileid +
-                "  服务器下载进度" +
-                serverStatus[newuuid]["progress"].toString() +
-                "%";
-            LogText[0] = log;
-            LogsNotifier.value = log;
-          }
-        } catch (e) {
-          logTextAdd("服务器下载错误  " + e.toString());
-        }
-        await delayedSeconds(1);
-      }
-      // 获取下载路径
-      String dlDir = await getPreferences("wallpaper64.exe");
-      dlDir = dlDir.replaceAll("wallpaper64.exe", "");
-      // 文件下载信息
-// https://node03.steamworkshopdownloader.io/prod/api/details/file
-// 存放 文件大小
-      String fileSize = "";
-      try {
-        Response detail =
-            await Dio().post(ApiURL + "details/file", data: "[" + fileid + "]");
-        List<dynamic> fileDetails = jsonDecode(detail.data);
-        fileSize = fileDetails[0]["file_size"].toString();
-        if (fileSize != "") {
-          fileSize =
-              "/" + (int.parse(fileSize) / 1048576).toStringAsFixed(2) + "M";
-        }
-      } catch (e) {
-        logTextAdd("获取文件信息错误  " + e.toString());
-      }
-
-// 是否已经单独添加一行log?
-      bool adddownloadlog = false;
-      await Dio().download(
-          ApiURL + "download/transmit?uuid=" + newuuid, dlDir + fileid + ".zip",
-          onReceiveProgress: (int cont, int total) {
-        if (adddownloadlog == true) {
-          String log = fileid +
-              " 已下载  " +
-              (cont / 1048576).toStringAsFixed(2) +
-              "M" +
-              fileSize;
-          LogText[0] = log;
-          LogsNotifier.value = log;
-        } else {
-          logTextAdd(fileid +
-              " 已下载  " +
-              (cont / 1048576).toStringAsFixed(2) +
-              "M" +
-              fileSize);
-          adddownloadlog = true;
-        }
-      });
-      logTextAdd("下载完成开始解压.....");
-      // 解压文件
-      // Read the Zip file from disk.
-      final bytes = File(dlDir + fileid + ".zip").readAsBytesSync();
-
-      // Decode the Zip file
-      final archive = ZipDecoder().decodeBytes(bytes);
-
-      // Extract the contents of the Zip archive to disk.
-      for (final file in archive) {
-        final filename = file.name;
-        if (file.isFile) {
-          logTextAdd(
-              "正在解压  /projects/defaultprojects/" + fileid + "/" + filename);
-          final data = file.content as List<int>;
-          File(dlDir + "/projects/defaultprojects/" + fileid + "/" + filename)
-            ..createSync(recursive: true)
-            ..writeAsBytesSync(data);
-        } else {
-          Directory(dlDir +
-                  "/projects/defaultprojects/" +
-                  fileid +
-                  "/" +
-                  filename)
-              .create(recursive: true);
-        }
-      }
-      logTextAdd("已解压完成.....");
-      //清空输入框
-      urlController.clear();
-      // 删除临时文件
-      File tmpFile = File(dlDir + fileid + ".zip");
-      tmpFile.deleteSync();
-      // 重启 we软件
-
-      if (restartWE == true) {
-        Process.run("taskkill", ["/F", "/IM", "wallpaper64.exe"])
-            .then((s) async {
-          await Process.run(wallpaper64, []);
-          await delayedSeconds(2).then((value) async {
-            await Process.run(wallpaper64, []);
-          });
-        });
-      }
-    } catch (e) {}
-  } else {
-    logTextAdd("请先选择wallpaper64.exe");
-  }
-}
-
 Future delayedSeconds(int second) async {
   await Future.delayed(Duration(seconds: second));
 }
@@ -559,4 +319,160 @@ Future logTextAdd(String log) async {
 // 所以 Notifier 不能使用LIST
   LogText.insert(0, log);
   LogsNotifier.value = log;
+}
+
+void _launchUrl(String url_string) async {
+  var url = Uri.parse(url_string);
+  if (!await launchUrl(url)) throw 'Could not launch $url';
+}
+
+Future doLink(bool relink) async {
+  //创建链接 https://www.daimajiaoliu.com/daima/479885188100403
+  //Link的参数为该链接的Path，create的参数为链接的目标文件夹
+  // 获取应用目录
+  // String run_dir = (await getApplicationDocumentsDirectory()).path;
+  String run_dir = Directory.current.path;
+
+  String dlDir = await getPreferences("wallpaper64.exe");
+  dlDir = dlDir.replaceAll("\\wallpaper64.exe", "");
+
+// 这里有问题 不能判断到底是不是 文件夹 连接同样认定为文件夹
+  Future _delDir() async {
+    var directory_431960 = Directory(
+        "$run_dir\\data\\flutter_assets\\assets\\steamcmd\\steamapps\\workshop\\content\\431960");
+    var exists = await directory_431960.exists();
+    if (exists == true) {
+      // 如果文件夹存在就删除
+      logTextAdd("431960文件夹删除中....");
+      directory_431960.delete(recursive: true);
+    }
+  }
+
+  Future _check_431960() async {
+    var file_431960 = File(
+        "$run_dir\\data\\flutter_assets\\assets\\steamcmd\\steamapps\\workshop\\content\\431960");
+    FileSystemEntityType type =
+        FileSystemEntity.typeSync(file_431960.path, followLinks: false);
+
+    var exists = await file_431960.exists();
+    if (exists == false && type.toString() != "link") {
+      logTextAdd("431960 连接不存在....");
+      // 如果不存在就创建 连接
+      _delDir().then((value) {
+        Link("$run_dir\\data\\flutter_assets\\assets\\steamcmd\\steamapps\\workshop\\content\\431960")
+            .create("$dlDir\\projects\\defaultprojects\\", recursive: true)
+            .then((value) => logTextAdd("431960 连接已建立完毕...."));
+      });
+    } else {
+      // 如果需要重建
+      if (relink) {
+        // 存在 就删除后重新创建
+        logTextAdd("431960连接重建中....");
+        file_431960.delete();
+      }
+    }
+  }
+
+  _check_431960(); // 检查连接
+}
+
+Future toDownItem(String downfileid) async {
+  final prefs = await SharedPreferences.getInstance();
+
+  var passWD = prefs.get("SteamPSWD");
+  var name = prefs.get("SteamName");
+
+  if (name != null && passWD != null) {
+    // id=431960 长度为9 所以简化代码
+    if (downfileid == "" || downfileid.length <= 9) {
+      urlController.clear();
+      logTextAdd("请输入正确的ID,连接包含id=xxxxxx");
+    } else {
+      downfileid = downfileid.substring(3);
+      logTextAdd("ID正确  开始下载...");
+      logTextAdd(
+          "首次使用Steam 可能需要验证码验证，提示 Steam Guard code:  如果看见此提示 请查看邮箱验证码输入...");
+
+      Future _downItem() async {
+        // 输入命令
+        // steamcmd +login 名字 密码 +force_install_dir Z:\ +workshop_download_item 431960 2798955847 +quit
+        String run_dir = Directory.current.path;
+        var script =
+            "$run_dir\\data\\flutter_assets\\assets\\steamcmd\\steamcmd.exe +login $name $passWD +workshop_download_item 431960 $downfileid +quit";
+        // var script ="./data/flutter_assets/assets/steamcmd/steamcmd.exe +force_install_dir "+"Z:\\"+" +login "+name.toString()+" "+passWD.toString()+" +workshop_download_item 431960 "+fileid+" +quit";
+        var shell = Shell();
+        await shell.run("cmd /c start $script");
+      }
+
+      doLink(false).then((value) {
+        logTextAdd("开始下载 $downfileid");
+        _downItem().then((value) {
+          urlController.clear();
+          logTextAdd("已完成 $downfileid 下载");
+
+// 准备做 自动打开 感觉没必要 就删了
+        });
+      });
+    }
+  } else {
+    logTextAdd("请先输入Steam账号密码，并且该账号已经购买了Wallpaper Engine");
+    logTextAdd("请先输入Steam账号密码，并且该账号已经购买了Wallpaper Engine");
+    logTextAdd("请先输入Steam账号密码，并且该账号已经购买了Wallpaper Engine");
+  }
+}
+
+Future multiDownFile() async {
+  List<String> ids = [];
+  Response response;
+  var dio = Dio();
+  response = await dio.get(urlController.text);
+  RegExp exp = RegExp(r"id=\d+");
+  var fileids = exp.allMatches(response.data.toString());
+
+  for (Match m in fileids) {
+    // 因为 allmatch 是 惰性匹配 所以每次只加载第一个就好了
+    // id=431960 长度为9 所以简化代码
+    if (m[0]!.length <= 9) {
+      continue;
+    }
+
+    ids.add(m[0]!);
+    print(m[0]!);
+  }
+  runScriptDown(ids);
+}
+
+Future runScriptDown(List<String> ids) async {
+  final prefs = await SharedPreferences.getInstance();
+
+  var passWD = prefs.get("SteamPSWD");
+  var name = prefs.get("SteamName");
+  String run_dir = Directory.current.path;
+  // .\steamcmd.exe +runscript Z:\test.txt
+  // .\steamcmd.exe +login AA BB +runscript Z:\test.txt +quit
+  String path = "$run_dir/down_ids.txt";
+  File file = File(path);
+
+// 这个方法只有一行，不可行
+  // for (var id in ids) {
+  //   await file.writeAsString("workshop_download_item 431960 $id\n",
+  //       mode: FileMode.append);
+  // }
+  // https://stackoverflow.com/questions/63719374/how-to-wait-for-foreach-to-complete-with-asynchronous-callbacks
+  Future.forEach(ids, (element) {
+    element = element.toString().substring(3);
+    file.writeAsStringSync("workshop_download_item 431960 $element\n",
+        mode: FileMode.append);
+  });
+
+  var script =
+      "$run_dir\\data\\flutter_assets\\assets\\steamcmd\\steamcmd.exe +login $name $passWD +runscript $path +quit";
+  var shell = Shell();
+  logTextAdd("开始整页下载中。。。。。");
+  await shell
+      .run("cmd /c start $script")
+      .then((value) => logTextAdd("整页下载已完成....."));
+  // 删除文件
+  file.deleteSync();
+  urlController.clear();
 }
